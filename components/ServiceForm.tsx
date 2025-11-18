@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AttendanceRecord, ThemeOption } from '../types';
-import { THEMES } from '../constants';
 import { fetchEntityData, fetchGuidance } from '../services/geminiService';
 import { dbService } from '../services/dbService';
 import { FormSectionTitle } from './FormSectionTitle';
@@ -22,13 +21,14 @@ export const ServiceForm: React.FC = () => {
     emailGuidance: ''
   });
 
+  const [themesList, setThemesList] = useState<ThemeOption[]>([]);
   const [isLoadingEntity, setIsLoadingEntity] = useState(false);
   const [isLoadingGuidance, setIsLoadingGuidance] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState<ThemeOption | null>(null);
   const [availableSubthemes, setAvailableSubthemes] = useState<string[]>([]);
 
-  // Initialize auto-filled fields on mount
+  // Initialize auto-filled fields and load themes on mount
   useEffect(() => {
     setFormData(prev => ({
       ...prev,
@@ -36,7 +36,18 @@ export const ServiceForm: React.FC = () => {
       startDate: getTodayDate(),
       startTime: getNowTime()
     }));
+
+    loadThemes();
   }, []);
+
+  const loadThemes = async () => {
+    try {
+      const themes = await dbService.getAllThemes();
+      setThemesList(themes);
+    } catch (error) {
+      console.error("Failed to load themes", error);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -45,7 +56,7 @@ export const ServiceForm: React.FC = () => {
 
   const handleThemeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const themeId = e.target.value;
-    const theme = THEMES.find(t => t.id === themeId) || null;
+    const theme = themesList.find(t => t.id === themeId) || null;
     
     setSelectedTheme(theme);
     setAvailableSubthemes(theme ? theme.subthemes : []);
@@ -60,13 +71,29 @@ export const ServiceForm: React.FC = () => {
     if (!formData.document) return;
     
     setIsLoadingEntity(true);
-    const result = await fetchEntityData(formData.document);
-    setIsLoadingEntity(false);
+    
+    try {
+        // 1. Tenta buscar no DB local primeiro
+        const localClient = await dbService.getClient(formData.document);
+        
+        if (localClient) {
+            setFormData(prev => ({ ...prev, name: localClient.name }));
+            setIsLoadingEntity(false);
+            return;
+        }
 
-    if (result.isValid) {
-      setFormData(prev => ({ ...prev, name: result.name }));
-    } else {
-      alert('Documento inválido ou não encontrado na base simulada.');
+        // 2. Se não achar, busca via IA (Simulação)
+        const result = await fetchEntityData(formData.document);
+        if (result.isValid) {
+            setFormData(prev => ({ ...prev, name: result.name }));
+        } else {
+            alert('Documento não encontrado. Cadastre-o na aba "Clientes" ou verifique a digitação.');
+        }
+    } catch (error) {
+        console.error("Erro na busca:", error);
+        alert('Erro ao buscar dados.');
+    } finally {
+        setIsLoadingEntity(false);
     }
   };
 
@@ -77,7 +104,7 @@ export const ServiceForm: React.FC = () => {
     }
 
     setIsLoadingGuidance(true);
-    const themeLabel = THEMES.find(t => t.id === formData.theme)?.label || formData.theme;
+    const themeLabel = themesList.find(t => t.id === formData.theme)?.label || formData.theme;
     const guidance = await fetchGuidance(themeLabel, formData.subtheme, formData.name || 'Empreendedor');
     
     setFormData(prev => ({
@@ -219,7 +246,7 @@ export const ServiceForm: React.FC = () => {
                 onClick={handleSearchEntity}
                 disabled={isLoadingEntity || !formData.document}
                 className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition disabled:opacity-50"
-                title="Buscar na Receita (Simulado)"
+                title="Buscar na Base Local ou Receita (Simulado)"
               >
                 {isLoadingEntity ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-search"></i>}
               </button>
@@ -251,7 +278,7 @@ export const ServiceForm: React.FC = () => {
               className="w-full border border-gray-300 rounded px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
             >
               <option value="">Selecione um Tema...</option>
-              {THEMES.map(theme => (
+              {themesList.map(theme => (
                 <option key={theme.id} value={theme.id}>{theme.label}</option>
               ))}
             </select>

@@ -10,6 +10,18 @@ export interface AttendanceRecord {
   emailGuidance: string;
 }
 
+export interface Client {
+  document: string; // CPF or CNPJ (Primary Key)
+  type: 'CPF' | 'CNPJ';
+  name: string; // Nome or Razão Social
+  fantasyName?: string; // Nome Fantasia
+  email: string;
+  phone: string;
+  address: string;
+  city: string;
+  uf: string;
+}
+
 export interface ThemeOption {
   id: string;
   label: string;

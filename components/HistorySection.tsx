@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AttendanceRecord } from '../types';
-import { THEMES } from '../constants';
+import { AttendanceRecord, ThemeOption } from '../types';
 import { dbService } from '../services/dbService';
 
 export const HistorySection: React.FC = () => {
@@ -8,7 +7,11 @@ export const HistorySection: React.FC = () => {
   const [endDate, setEndDate] = useState('');
   const [allRecords, setAllRecords] = useState<AttendanceRecord[]>([]);
   const [filteredData, setFilteredData] = useState<AttendanceRecord[]>([]);
+  const [themesMap, setThemesMap] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Modal State
+  const [selectedRecord, setSelectedRecord] = useState<AttendanceRecord | null>(null);
 
   useEffect(() => {
     loadData();
@@ -17,7 +20,16 @@ export const HistorySection: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const records = await dbService.getAllAttendances();
+      const [records, themes] = await Promise.all([
+        dbService.getAllAttendances(),
+        dbService.getAllThemes()
+      ]);
+      
+      // Create a map for faster lookup: id -> label
+      const map: Record<string, string> = {};
+      themes.forEach(t => map[t.id] = t.label);
+      setThemesMap(map);
+
       setAllRecords(records);
       setFilteredData(records);
     } catch (error) {
@@ -57,10 +69,25 @@ export const HistorySection: React.FC = () => {
     setFilteredData(allRecords);
   };
 
-  const getThemeLabel = (id: string) => THEMES.find(t => t.id === id)?.label || id;
+  const getThemeLabel = (id: string) => themesMap[id] || id;
+
+  // Modal Helpers
+  const openModal = (record: AttendanceRecord) => setSelectedRecord(record);
+  const closeModal = () => setSelectedRecord(null);
+
+  const printRecord = () => {
+    const printContent = document.getElementById('modal-print-area');
+    if (printContent) {
+      const originalContents = document.body.innerHTML;
+      document.body.innerHTML = printContent.innerHTML;
+      window.print();
+      document.body.innerHTML = originalContents;
+      window.location.reload(); // Reload to restore React state/events after body replacement
+    }
+  };
 
   return (
-    <div className="bg-white rounded-lg shadow-xl overflow-hidden border border-gray-200">
+    <div className="bg-white rounded-lg shadow-xl overflow-hidden border border-gray-200 relative">
       <div className="bg-gradient-to-r from-blue-700 to-blue-600 px-6 py-3 flex justify-between items-center">
         <h2 className="text-xl font-bold text-white uppercase shadow-sm">
           <i className="fa-solid fa-list mr-2"></i> Histórico de Atendimentos
@@ -171,7 +198,11 @@ export const HistorySection: React.FC = () => {
                       <div className="text-gray-600 text-xs">{record.subtheme}</div>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <button className="text-blue-600 hover:text-blue-800 transition p-2 bg-blue-50 rounded-full hover:bg-blue-100" title="Ver Detalhes">
+                      <button 
+                        onClick={() => openModal(record)}
+                        className="text-blue-600 hover:text-blue-800 transition p-2 bg-blue-50 rounded-full hover:bg-blue-100" 
+                        title="Ver Detalhes Completos"
+                      >
                         <i className="fa-regular fa-eye"></i>
                       </button>
                     </td>
@@ -192,6 +223,104 @@ export const HistorySection: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* MODAL DE DETALHES */}
+      {selectedRecord && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-in-out]">
+            
+            {/* Header Modal */}
+            <div className="bg-blue-700 text-white px-6 py-4 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <i className="fa-solid fa-file-lines"></i> Detalhes do Atendimento
+                </h3>
+                <p className="text-xs text-blue-200">ID Registro: {selectedRecord.id}</p>
+              </div>
+              <button onClick={closeModal} className="text-white/80 hover:text-white hover:bg-blue-600 p-2 rounded-full transition">
+                <i className="fa-solid fa-times text-xl"></i>
+              </button>
+            </div>
+
+            {/* Body Modal - Printable Area */}
+            <div id="modal-print-area" className="p-6 overflow-y-auto flex-grow space-y-6">
+              
+              <div className="grid grid-cols-2 gap-4 border-b pb-4">
+                 <div>
+                    <label className="text-xs font-bold text-gray-500 uppercase">Data</label>
+                    <p className="text-gray-800 font-medium">{selectedRecord.startDate}</p>
+                 </div>
+                 <div>
+                    <label className="text-xs font-bold text-gray-500 uppercase">Hora</label>
+                    <p className="text-gray-800 font-medium">{selectedRecord.startTime}</p>
+                 </div>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-bold text-blue-700 uppercase mb-2 border-b border-blue-100 pb-1">
+                   <i className="fa-solid fa-user mr-1"></i> Cliente
+                </h4>
+                <div className="bg-blue-50 p-3 rounded border border-blue-100">
+                   <p className="font-bold text-lg text-blue-900">{selectedRecord.name}</p>
+                   <p className="font-mono text-sm text-blue-700">{selectedRecord.document}</p>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-bold text-gray-700 uppercase mb-2 border-b border-gray-100 pb-1">
+                   <i className="fa-solid fa-tag mr-1"></i> Classificação
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="text-xs text-gray-500">Tema</label>
+                        <p className="font-medium text-gray-800">{getThemeLabel(selectedRecord.theme)}</p>
+                    </div>
+                    <div>
+                        <label className="text-xs text-gray-500">Subtema</label>
+                        <p className="font-medium text-gray-800">{selectedRecord.subtheme}</p>
+                    </div>
+                </div>
+              </div>
+
+              <div>
+                 <h4 className="text-sm font-bold text-gray-700 uppercase mb-2 border-b border-gray-100 pb-1">
+                   <i className="fa-solid fa-align-left mr-1"></i> Descrição do Serviço
+                </h4>
+                 <div className="bg-gray-50 p-4 rounded text-gray-700 text-sm leading-relaxed border border-gray-200 whitespace-pre-wrap">
+                   {selectedRecord.description || "Nenhuma descrição informada."}
+                 </div>
+              </div>
+
+              <div>
+                 <h4 className="text-sm font-bold text-gray-700 uppercase mb-2 border-b border-gray-100 pb-1">
+                   <i className="fa-solid fa-envelope mr-1"></i> Orientação (Modelo E-mail)
+                </h4>
+                 <div className="bg-yellow-50 p-4 rounded text-gray-800 text-sm font-mono border border-yellow-200 whitespace-pre-wrap">
+                   {selectedRecord.emailGuidance || "Nenhuma orientação gerada."}
+                 </div>
+              </div>
+
+            </div>
+
+            {/* Footer Modal */}
+            <div className="bg-gray-50 border-t p-4 flex justify-end gap-3">
+              <button 
+                onClick={printRecord}
+                className="px-4 py-2 text-gray-700 border border-gray-300 bg-white hover:bg-gray-50 rounded font-medium transition flex items-center gap-2"
+              >
+                <i className="fa-solid fa-print"></i> Imprimir
+              </button>
+              <button 
+                onClick={closeModal}
+                className="px-6 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded font-medium transition"
+              >
+                Fechar
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 };
